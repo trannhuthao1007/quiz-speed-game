@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Trò chơi trắc nghiệm qua mạng — Tính theo tốc độ (nhóm)</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;margin:18px;background:#f4f6f8}
+    .container{max-width:1100px;margin:0 auto}
+    h1{font-size:20px}
+    .row{display:flex;gap:12px;align-items:flex-start}
+    .panel{background:#fff;padding:12px;border-radius:8px;flex:1;box-shadow:0 2px 6px rgba(0,0,0,0.04)}
+    button{padding:8px 12px;border-radius:6px;border:1px solid #ccc;background:#fff;cursor:pointer}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:6px;border-bottom:1px solid #e0e0e0;text-align:left}
+    .team-btn{display:block;margin:6px 0;width:100%}
+    .leader{font-weight:700}
+    .small{font-size:13px;color:#666}
+    .controls{display:flex;gap:8px;align-items:center}
+    input,select{padding:6px;border-radius:6px;border:1px solid #ddd}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Trò chơi trắc nghiệm qua mạng — Tốc độ + Đúng</h1>
+
+    <p class="small">Hướng dẫn: khởi chạy server Node.js (code bên dưới). Giáo viên mở chế độ <strong>Teacher</strong>, tham gia tạo câu hỏi. Các nhóm mở chế độ <strong>Team</strong> trên nhiều máy, nhập tên nhóm và kết nối đến server. Khi giáo viên hiển thị câu hỏi và bấm <em>Bắt đầu</em>, server đánh dấu thời điểm bắt đầu; nhóm nào gửi đáp án đúng nhanh nhất sẽ được cộng điểm.</p>
+
+    <div class="row">
+      <div class="panel" style="flex:0.7">
+        <h3>Chế độ</h3>
+        <div class="controls">
+          <label>Chọn vai trò:</label>
+          <select id="role">
+            <option value="team">Team (laptop/điện thoại)</option>
+            <option value="teacher">Teacher (giáo viên)</option>
+          </select>
+          <input id="serverUrl" placeholder="Server URL (ví dụ: http://your-domain.com)" style="flex:1" />
+          <button id="connectBtn">Kết nối</button>
+        </div>
+
+        <div id="teamPanel" style="margin-top:12px;display:none">
+          <input id="teamName" placeholder="Tên nhóm" />
+          <button id="joinBtn">Tham gia</button>
+          <div id="teamStatus" class="small"></div>
+          <div id="teamQuestionArea" style="margin-top:12px"></div>
+        </div>
+
+        <div id="teacherPanel" style="margin-top:12px;display:none">
+          <h4>Quản lý câu hỏi (Teacher)</h4>
+          <textarea id="qText" placeholder="Nội dung câu hỏi" style="width:100%;height:60px"></textarea>
+          <div style="margin-top:8px">
+            <input id="opt0" placeholder="Phương án A" />
+            <input id="opt1" placeholder="Phương án B" />
+            <input id="opt2" placeholder="Phương án C" />
+            <input id="opt3" placeholder="Phương án D" />
+          </div>
+          <div style="margin-top:8px" class="controls">
+            <label>Đáp án đúng:</label>
+            <select id="correctIndex"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select>
+            <button id="publishQ">Hiển thị câu cho tất cả</button>
+            <button id="startTimer" disabled>Bắt đầu tính thời gian</button>
+            <button id="revealAnswer" disabled>Hiện đáp án</button>
+          </div>
+          <div id="teacherLog" style="margin-top:8px;height:160px;overflow:auto;background:#fafafa;padding:8px;border-radius:6px"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="flex:0.5">
+        <h3>Điểm & Bảng xếp hạng</h3>
+        <div id="leaderboard"></div>
+        <hr />
+        <h4>Thiết lập chấm điểm</h4>
+        <div class="small">Điểm cơ bản khi đúng + điểm thưởng cho tốc độ (nhóm đúng nhanh nhất nhận đầy đủ bonus)</div>
+        <div style="margin-top:6px" class="controls">
+          <label>Base:</label><input id="cfgBase" value="100" style="width:80px" />
+          <label>Bonus tối đa:</label><input id="cfgBonus" value="50" style="width:80px" />
+        </div>
+      </div>
+    </div>
+
+    <hr />
+
+    <h3>Hướng dẫn nhanh (client)</h3>
+    <p>Mở trang này, nhập URL server (ví dụ: <code>https://quiz.yourdomain.com</code>), chọn vai trò Teacher hoặc Team và kết nối.</p>
+
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+  (function(){
+    let socket = null;
+    let role = 'team';
+    const byId = id=>document.getElementById(id);
+
+    byId('connectBtn').onclick = ()=>{
+      const url = byId('serverUrl').value.trim();
+      if(!url){alert('Nhập server URL');return}
+      socket = io(url, {transports:['websocket']});
+      socket.on('connect', ()=>{
+        logTeacher('Đã kết nối: ' + socket.id);
+        role = byId('role').value;
+        if(role==='team'){
+          byId('teamPanel').style.display='block';
+          byId('teacherPanel').style.display='none';
+        } else {
+          byId('teamPanel').style.display='none';
+          byId('teacherPanel').style.display='block';
+          socket.emit('registerTeacher');
+        }
+      });
+
+      socket.on('leaderboard', list => renderLeaderboard(list));
+
+      socket.on('questionPublished', q=>{
+        if(role==='team') renderTeamQuestion(q);
+        if(role==='teacher') logTeacher('Câu đã được phát tới tất cả (text: ' + q.text + ')');
+        byId('startTimer').disabled=false; byId('revealAnswer').disabled=true;
+      });
+
+      socket.on('timerStarted', startTs=>{
+        if(role==='team'){
+          enableAnswering();
+          byId('teamStatus').innerText = 'Timer bắt đầu — trả lời!';
+        }
+        if(role==='teacher') logTeacher('Giáo viên đã bắt đầu bộ đếm: ' + new Date(startTs).toLocaleTimeString());
+      });
+
+      socket.on('award', data => {
+        logTeacher(`Đã award: ${data.name} +${data.points} (bonus ${data.bonus}) — thời gian ${(data.elapsed/1000).toFixed(2)}s`);
+        alert('Kết quả: ' + data.name + ' thắng — +' + data.points + ' điểm');
+        renderLeaderboardRequest();
+      });
+
+      socket.on('answerResult', r=>{
+        if(!r.correct) alert('Sai hoặc đã có đội khác lấy thưởng.');
+      });
+    }
+
+    // Teacher actions
+    byId('publishQ').onclick = ()=>{
+      if(!socket) return alert('Chưa kết nối');
+      const q = {
+        text: byId('qText').value,
+        opts: [byId('opt0').value, byId('opt1').value, byId('opt2').value, byId('opt3').value],
+        answerIndex: parseInt(byId('correctIndex').value,10)
+      };
+      socket.emit('publishQuestion', q);
+      logTeacher('Đã publish câu: ' + q.text);
+    }
+
+    byId('startTimer').onclick = ()=>{
+      if(!socket) return alert('Chưa kết nối');
+      const startTs = Date.now();
+      socket.emit('startTimer', startTs);
+      byId('startTimer').disabled = true; byId('revealAnswer').disabled=false;
+    }
+
+    byId('revealAnswer').onclick = ()=>{
+      alert('Giáo viên hiển thị đáp án (dùng nội bộ)');
+    }
+
+    function logTeacher(msg){
+      const d = byId('teacherLog'); if(d) d.innerHTML = new Date().toLocaleTimeString() + ' — ' + msg + '<br>' + d.innerHTML;
+    }
+
+    // Team UI
+    byId('joinBtn').onclick = ()=>{
+      if(!socket) return alert('Chưa kết nối');
+      const name = byId('teamName').value.trim(); if(!name) return alert('Nhập tên nhóm');
+      socket.emit('registerTeam', name);
+      byId('teamStatus').innerText = 'Đã gửi yêu cầu tham gia: ' + name;
+    }
+
+    function renderTeamQuestion(q){
+      const area = byId('teamQuestionArea'); area.innerHTML = '';
+      const h = document.createElement('div'); h.innerHTML = '<strong>' + q.text + '</strong>';
+      const optsDiv = document.createElement('div'); optsDiv.style.marginTop='8px';
+      q.opts.forEach((opt,i)=>{
+        const b = document.createElement('button'); b.textContent = opt; b.style.margin='4px'; b.disabled=true;
+        b.onclick = ()=>{
+          const base = parseInt(byId('cfgBase').value,10) || 100;
+          const bonusMax = parseInt(byId('cfgBonus').value,10) || 50;
+          socket.emit('submitAnswer', { choiceIndex: i, basePoints: base, bonusMax: bonusMax, bonusWindow: 10000 });
+        }
+        optsDiv.appendChild(b);
+      });
+      area.appendChild(h); area.appendChild(optsDiv);
+    }
+
+    function enableAnswering(){
+      const area = byId('teamQuestionArea'); if(!area) return;
+      const buttons = area.querySelectorAll('button'); buttons.forEach(b=>b.disabled=false);
+    }
+
+    function renderLeaderboard(list){
+      const el = byId('leaderboard'); if(!el) return;
+      if(!list) list = [];
+      const sorted = list.sort((a,b)=>b.score-a.score);
+      el.innerHTML = '<table><tr><th>Vị trí</th><th>Nhóm</th><th>Điểm</th></tr>' + sorted.map((t,idx)=>`<tr ${idx===0?"class=\'leader\'":''}><td>${idx+1}</td><td>${t.name}</td><td>${t.score}</td></tr>`).join('') + '</table>';
+    }
+
+    function renderLeaderboardRequest(){ if(socket) socket.emit('getLeaderboard'); }
+
+  })();
+  </script>
+
+</body>
+</html>
